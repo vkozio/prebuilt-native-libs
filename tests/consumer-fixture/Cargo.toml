@@ -6,8 +6,8 @@ build = "build.rs"
 
 [features]
 default = ["rocksdb", "sqlite"]
-rocksdb = ["dep:rocksdb", "dep:librocksdb-sys"]
-sqlite = ["dep:sqlite"]
+rocksdb = ["dep:rocksdb", "dep:librocksdb-sys", "librocksdb-sys/default"]
+sqlite = ["dep:sqlite", "sqlite/linkage"]
 
 [dependencies]
 rocksdb = { version = "=0.22.0", optional = true }

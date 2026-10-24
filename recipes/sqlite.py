@@ -48,7 +48,7 @@ TRIPLES = {
     "windows-2022": "x86_64-pc-windows-msvc",
     "ubuntu-22.04": "x86_64-unknown-linux-gnu",
     "macos-15-intel": "x86_64-apple-darwin",
-    "macos-26-arm64": "aarch64-apple-darwin",
+    "macos-26": "aarch64-apple-darwin",
 }
 
 
@@ -122,6 +122,10 @@ def verify(out: Path, triple: str, cache: Path) -> None:
     env[f"{ENV_PREFIX}_LIB_DIR"] = str(staging / "lib")
     env[f"{ENV_PREFIX}_INCLUDE_DIR"] = str(staging / "include")
     env[f"{ENV_PREFIX}_STATIC"] = "1"
+    cargo = shutil.which("cargo")
+    log(f"cargo binary: {cargo}  (path={env.get('PATH', '')[:200]})")
+    if cargo:
+        run([cargo, "--version"], env=cargo_env(env))
     run(
         ["cargo", "run", "--release", "--no-default-features", "--features", FEATURE],
         cwd=REPO_ROOT / "tests" / "consumer-fixture",
