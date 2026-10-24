@@ -29,6 +29,8 @@ jobs:
     outputs:
       matrix: ${{ steps.set.outputs.matrix }}
     steps:
+      - uses: actions/checkout@v4
+
       - id: set
         env:
           LIBS: ${{ inputs.libs }}
