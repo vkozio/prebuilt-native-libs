@@ -74,13 +74,13 @@ jobs:
         id: build
         shell: bash
         env:
-          LIB: ${{ matrix.lib }}
+          RECIPE_LIB: ${{ matrix.lib }}
           TRIPLE: ${{ matrix.triple }}
           OUTDIR: ${{ runner.temp }}/out
         run: |
           PYTHON="$(command -v python3 || command -v python)"
           mkdir -p "$OUTDIR"
-          "$PYTHON" "recipes/$LIB.py" --triple "$TRIPLE" --out "$OUTDIR"
+          "$PYTHON" "recipes/$RECIPE_LIB.py" --triple "$TRIPLE" --out "$OUTDIR"
 
       - name: Validate manifest & sha256
         shell: bash
@@ -101,12 +101,12 @@ jobs:
       - name: Verify consumer fixture
         shell: bash
         env:
-          LIB: ${{ matrix.lib }}
+          RECIPE_LIB: ${{ matrix.lib }}
           TRIPLE: ${{ matrix.triple }}
           OUTDIR: ${{ runner.temp }}/out
         run: |
           PYTHON="$(command -v python3 || command -v python)"
-          "$PYTHON" "recipes/$LIB.py" --verify --triple "$TRIPLE" --out "$OUTDIR"
+          "$PYTHON" "recipes/$RECIPE_LIB.py" --verify --triple "$TRIPLE" --out "$OUTDIR"
 
   publish-release:
     if: inputs.publish_release == true

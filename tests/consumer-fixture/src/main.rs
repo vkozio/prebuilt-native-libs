@@ -42,10 +42,12 @@ fn test_sqlite() {
     conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)").expect("create");
     conn.execute("INSERT INTO t (v) VALUES ('hello')").expect("insert");
 
-    let mut stmt = conn.prepare("SELECT COUNT(*) FROM t").unwrap();
-    assert_eq!(stmt.next().unwrap(), sqlite::State::Row);
-    let count: i64 = stmt.read::<i64, _>(0).unwrap();
-    assert_eq!(count, 1);
+    {
+        let mut stmt = conn.prepare("SELECT COUNT(*) FROM t").unwrap();
+        assert_eq!(stmt.next().unwrap(), sqlite::State::Row);
+        let count: i64 = stmt.read::<i64, _>(0).unwrap();
+        assert_eq!(count, 1);
+    }
 
     // The statement borrows `conn`; keep it scoped so the borrow ends before
     // `drop(conn)` below.

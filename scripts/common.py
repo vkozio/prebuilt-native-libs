@@ -237,8 +237,13 @@ def _load_vsdevcmd(env: dict[str, str]) -> bool:
     vsdevcmd = Path(out) / "Common7/Tools/VsDevCmd.bat"
     if not vsdevcmd.exists():
         return False
+    # Run VsDevCmd.bat from its own directory passing only the bare file name:
+    # a full quoted path via a list gets its inner quotes escaped by subprocess
+    # (\"...\"), which cmd.exe treats literally and fails with
+    # '"C:\...\VsDevCmd.bat"' is not recognized'. A bare name needs no quotes.
     proc = subprocess.run(
-        ["cmd", "/d", "/s", "/c", f'call "{vsdevcmd}" && set'],
+        f"cmd /d /c {vsdevcmd.name} && set",
+        cwd=vsdevcmd.parent,
         capture_output=True, text=True, check=False,
     )
     if proc.returncode != 0:
