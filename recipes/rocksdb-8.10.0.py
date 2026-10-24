@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from common import (
     cargo_env,
     download,
+    ensure_msvc_env,
     extract_tarball,
     log,
     package_artifact,

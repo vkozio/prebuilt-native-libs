@@ -41,20 +41,23 @@ fn test_sqlite() {
     let conn = sqlite::Connection::open(&db_path).expect("sqlite open");
     conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)").expect("create");
     conn.execute("INSERT INTO t (v) VALUES ('hello')").expect("insert");
-    let n: i64 = conn
+
+    let count: i64 = conn
         .prepare("SELECT COUNT(*) FROM t")
         .unwrap()
-        .iter()
-        .next()
-        .unwrap()
-        .unwrap()
-        .read(0)
+        .read::<i64, _>(0)
         .unwrap();
-    assert_eq!(n, 1);
+    assert_eq!(count, 1);
+
     let mut stmt = conn.prepare("SELECT v FROM t").unwrap();
-    while let Ok(Some(row)) = stmt.next() {
-        assert_eq!(row.read::<&str, _>(0).unwrap(), "hello");
+    let mut seen = 0;
+    while let Ok(sqlite::State::Row) = stmt.next() {
+        let v: String = stmt.read::<String, _>(0).unwrap();
+        assert_eq!(v, "hello");
+        seen += 1;
     }
+    assert_eq!(seen, 1);
+
     drop(conn);
     let _ = std::fs::remove_dir_all(&dir);
     println!("PASS sqlite");
