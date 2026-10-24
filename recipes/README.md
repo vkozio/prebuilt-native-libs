@@ -33,9 +33,15 @@ code.
 ## How to add a new library
 
 1. Create `recipes/<lib>.py` following the `recipes/sqlite.py` example.
-2. Add a row to the matrix in `.github/workflows/native-libs.yml`
-   (os + triple + lib).
-3. Add a consumer fixture to `tests/consumer-fixture/` (env variables).
+   The recipe is self-contained: it declares its supported triples
+   (`TRIPLES`), the cargo feature (`FEATURE`), the env prefix (`ENV_PREFIX`)
+   and a `verify(out, triple, cache)` implementation that runs the consumer
+   fixture with the right env variables.
+2. The CI matrix (`scripts/build_matrix.py`) and the verification step are
+   discovered automatically from the recipe metadata — **no workflow edits
+   are needed** when adding a library.
+3. Add a consumer fixture feature to `tests/consumer-fixture/` if the library
+   is new (the env variables are set by the recipe's `verify()`).
 4. Run it locally for one triple, then in CI.
 
 ## Cache

@@ -6,6 +6,7 @@ Requires Python >= 3.12. Standard library only — no third-party dependencies.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import platform
@@ -13,6 +14,7 @@ import re
 import shutil
 import subprocess
 import sys
+import types
 import urllib.request
 import zipfile
 from datetime import datetime, timezone
@@ -34,6 +36,27 @@ def require_python() -> None:
 
 def log(message: str) -> None:
     print(f"[native-libs] {message}", flush=True)
+
+
+def discover_recipes() -> dict[str, types.ModuleType]:
+    """Import every recipe module from recipes/ (filename stem -> module).
+
+    Recipes are plain Python files; the workflow, fetch script and matrix
+    builder consume their module-level metadata instead of hardcoding library
+    lists. Required metadata: ``LIB``, ``TRIPLES`` (os -> triple),
+    ``ENV_PREFIX``, ``FEATURE`` and a ``verify(out, triple, cache)`` hook.
+    """
+    recipes: dict[str, types.ModuleType] = {}
+    for path in sorted((REPO_ROOT / "recipes").glob("*.py")):
+        if path.name.startswith("_"):
+            continue
+        spec = importlib.util.spec_from_file_location(f"recipes.{path.stem}", path)
+        if spec is None or spec.loader is None:
+            continue
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        recipes[path.stem] = module
+    return recipes
 
 
 def run(

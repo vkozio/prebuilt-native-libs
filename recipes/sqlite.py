@@ -23,6 +23,7 @@ from common import (
     extract_zip_strip,
     log,
     package_artifact,
+    REPO_ROOT,
     require_python,
     run,
 )
@@ -37,6 +38,17 @@ FLAGS = [
     "-DSQLITE_ENABLE_JSON1",
     "-DNDEBUG",
 ]
+
+LIB = "sqlite"
+UPSTREAM_VERSION = SQLITE_VERSION
+FEATURE = "sqlite"
+ENV_PREFIX = "SQLITE3"
+TRIPLES = {
+    "windows-2022": "x86_64-pc-windows-msvc",
+    "ubuntu-22.04": "x86_64-unknown-linux-gnu",
+    "macos-15-intel": "x86_64-apple-darwin",
+    "macos-26-arm64": "aarch64-apple-darwin",
+}
 
 
 def version_code(version: str) -> int:
@@ -101,6 +113,22 @@ def build(
     log(f"sqlite [{triple}] done: lib={lib_name} zip={zip_path.name}")
 
 
+def verify(out: Path, triple: str, cache: Path) -> None:
+    """Link and run the consumer fixture against the staged build."""
+    del cache
+    staging = out / LIB
+    env = dict(os.environ)
+    env[f"{ENV_PREFIX}_LIB_DIR"] = str(staging / "lib")
+    env[f"{ENV_PREFIX}_INCLUDE_DIR"] = str(staging / "include")
+    env[f"{ENV_PREFIX}_STATIC"] = "1"
+    run(
+        ["cargo", "run", "--release", "--no-default-features", "--features", FEATURE],
+        cwd=REPO_ROOT / "tests" / "consumer-fixture",
+        env=env,
+    )
+    log(f"sqlite consumer fixture PASSED ({triple})")
+
+
 def main() -> None:
     require_python()
     ap = argparse.ArgumentParser()
@@ -109,7 +137,11 @@ def main() -> None:
     ap.add_argument("--version", default=SQLITE_VERSION)
     ap.add_argument("--year", default=SQLITE_YEAR)
     ap.add_argument("--cache", default=str(Path(tempfile.gettempdir()) / "native-libs-cache"))
+    ap.add_argument("--verify", action="store_true", help="run the consumer fixture instead of building")
     args = ap.parse_args()
+    if args.verify:
+        verify(Path(args.out), args.triple, Path(args.cache))
+        return
     build(args.triple, Path(args.out), Path(args.cache), args.version, args.year)
 
 

@@ -24,6 +24,7 @@ from common import (
     extract_tarball,
     log,
     package_artifact,
+    REPO_ROOT,
     require_python,
     run,
 )
@@ -38,6 +39,17 @@ edition = "2021"
 rocksdb = "=0.22.0"
 librocksdb-sys = "=0.16.0"
 """
+
+LIB = "rocksdb"
+UPSTREAM_VERSION = ROCK_VERSION
+FEATURE = "rocksdb"
+ENV_PREFIX = "ROCKSDB"
+TRIPLES = {
+    "windows-2022": "x86_64-pc-windows-msvc",
+    "ubuntu-22.04": "x86_64-unknown-linux-gnu",
+    "macos-15-intel": "x86_64-apple-darwin",
+    "macos-26-arm64": "aarch64-apple-darwin",
+}
 
 
 def build(triple: str, out: Path, cache: Path, rock_version: str = ROCK_VERSION) -> None:
@@ -99,6 +111,22 @@ def build(triple: str, out: Path, cache: Path, rock_version: str = ROCK_VERSION)
     log(f"rocksdb [{triple}] done: lib={lib_name} zip={zip_path.name}")
 
 
+def verify(out: Path, triple: str, cache: Path) -> None:
+    """Link and run the consumer fixture against the staged build."""
+    del cache
+    staging = out / LIB
+    env = dict(os.environ)
+    env[f"{ENV_PREFIX}_LIB_DIR"] = str(staging / "lib")
+    env[f"{ENV_PREFIX}_INCLUDE_DIR"] = str(staging / "include")
+    env[f"{ENV_PREFIX}_STATIC"] = "1"
+    run(
+        ["cargo", "run", "--release", "--no-default-features", "--features", FEATURE],
+        cwd=REPO_ROOT / "tests" / "consumer-fixture",
+        env=env,
+    )
+    log(f"rocksdb consumer fixture PASSED ({triple})")
+
+
 def main() -> None:
     require_python()
     ap = argparse.ArgumentParser()
@@ -106,7 +134,11 @@ def main() -> None:
     ap.add_argument("--out", required=True)
     ap.add_argument("--version", default=ROCK_VERSION)
     ap.add_argument("--cache", default=str(Path(tempfile.gettempdir()) / "native-libs-cache"))
+    ap.add_argument("--verify", action="store_true", help="run the consumer fixture instead of building")
     args = ap.parse_args()
+    if args.verify:
+        verify(Path(args.out), args.triple, Path(args.cache))
+        return
     build(args.triple, Path(args.out), Path(args.cache), args.version)
 
 

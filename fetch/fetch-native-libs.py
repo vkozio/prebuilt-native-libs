@@ -25,13 +25,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from common import (
     detect_triple,
+    discover_recipes,
     log,
     merge_env_config,
     require_python,
     sha256_file,
 )
-
-ENV_PREFIX = {"rocksdb": "ROCKSDB", "sqlite": "SQLITE3"}
 
 
 def gh(*args: str) -> str:
@@ -108,16 +107,21 @@ def main() -> None:
     triple = args.triple if args.triple not in ("", "auto") else detect_triple()
     log(f"triple: {triple}")
     cache_root = Path(args.cache_root)
+    recipes = discover_recipes()
 
     env_lines: list[str] = []
     for lib in (part.strip() for part in args.lib.split(",")):
         if not lib:
             continue
-        prefix = ENV_PREFIX.get(lib)
-        if prefix is None:
-            raise SystemExit(f"unknown lib: {lib}")
-        extracted = resolve_asset(args.repo, lib, triple, args.channel, args.tag, args.url)
-        target = install(extracted, lib, triple, cache_root)
+        recipe = recipes.get(lib)
+        if recipe is None:
+            recipe = next((r for r in recipes.values() if r.LIB == lib), None)
+        if recipe is None:
+            raise SystemExit(f"unknown lib: {lib} (no recipes/{lib}.py)")
+        prefix = recipe.ENV_PREFIX
+        short = recipe.LIB
+        extracted = resolve_asset(args.repo, short, triple, args.channel, args.tag, args.url)
+        target = install(extracted, short, triple, cache_root)
         env_lines.extend(
             [
                 f"{prefix}_LIB_DIR={target / 'lib'}",

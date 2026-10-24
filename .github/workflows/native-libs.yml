@@ -8,17 +8,17 @@ on:
   workflow_dispatch:
     inputs:
       libs:
-        description: 'Libraries: sqlite,rocksdb-8.10.0 or all'
+        description: "Libraries: sqlite,rocksdb-8.10.0 or all"
         type: string
-        default: 'all'
+        default: "all"
       publish_release:
-        description: 'Publish a GitHub Release (native-libs-v<release_version>)'
+        description: "Publish a GitHub Release (native-libs-v<release_version>)"
         type: boolean
         default: false
       release_version:
-        description: 'Release version'
+        description: "Release version"
         type: string
-        default: '0.1.0'
+        default: "0.1.0"
 
 permissions:
   contents: write
@@ -33,27 +33,8 @@ jobs:
         env:
           LIBS: ${{ inputs.libs }}
         run: |
-          python3 - <<'PY'
-          import json, os
-          sel = [x.strip() for x in os.environ["LIBS"].split(",") if x.strip()]
-          all_libs = ["sqlite", "rocksdb-8.10.0"]
-          if "all" in sel:
-              sel = all_libs
-          else:
-              sel = [l for l in all_libs if l in sel]
-          os_map = {
-              "windows-2022": "x86_64-pc-windows-msvc",
-              "ubuntu-22.04": "x86_64-unknown-linux-gnu",
-              "macos-15-intel": "x86_64-apple-darwin",
-              "macos-26-arm64": "aarch64-apple-darwin",
-          }
-          lib_os = {l: list(os_map) for l in all_libs}
-          rows = []
-          for lib in sel:
-              for os_name in lib_os[lib]:
-                  rows.append({"lib": lib, "os": os_name, "triple": os_map[os_name]})
-          print(json.dumps(rows))
-          PY
+          MATRIX=$(python3 scripts/build_matrix.py --libs "$LIBS")
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: filter
@@ -69,9 +50,11 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Rust toolchain (RocksDB)
-        if: matrix.lib == 'rocksdb-8.10.0'
+      - name: Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Build & package
         id: build
@@ -81,15 +64,17 @@ jobs:
           TRIPLE: ${{ matrix.triple }}
           OUTDIR: ${{ runner.temp }}/out
         run: |
+          PYTHON="$(command -v python3 || command -v python)"
           mkdir -p "$OUTDIR"
-          python "recipes/$LIB.py" --triple "$TRIPLE" --out "$OUTDIR"
+          "$PYTHON" "recipes/$LIB.py" --triple "$TRIPLE" --out "$OUTDIR"
 
       - name: Validate manifest & sha256
         shell: bash
         env:
           OUTDIR: ${{ runner.temp }}/out
         run: |
-          python scripts/check_manifest.py --zip "$OUTDIR"/native-libs-*.zip
+          PYTHON="$(command -v python3 || command -v python)"
+          "$PYTHON" scripts/check_manifest.py --zip "$OUTDIR"/native-libs-*.zip
 
       - name: Upload artifact (dev channel)
         uses: actions/upload-artifact@v4
@@ -99,27 +84,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Verify consumer fixture (sqlite)
-        if: matrix.lib == 'sqlite'
+      - name: Verify consumer fixture
         shell: bash
         env:
-          SQLITE3_LIB_DIR: ${{ runner.temp }}/out/sqlite/lib
-          SQLITE3_INCLUDE_DIR: ${{ runner.temp }}/out/sqlite/include
-          SQLITE3_STATIC: '1'
+          LIB: ${{ matrix.lib }}
+          TRIPLE: ${{ matrix.triple }}
+          OUTDIR: ${{ runner.temp }}/out
         run: |
-          cd tests/consumer-fixture
-          cargo run --release --no-default-features --features sqlite
-
-      - name: Verify consumer fixture (rocksdb)
-        if: matrix.lib == 'rocksdb-8.10.0'
-        shell: bash
-        env:
-          ROCKSDB_LIB_DIR: ${{ runner.temp }}/out/rocksdb/lib
-          ROCKSDB_INCLUDE_DIR: ${{ runner.temp }}/out/rocksdb/include
-          ROCKSDB_STATIC: '1'
-        run: |
-          cd tests/consumer-fixture
-          cargo run --release --no-default-features --features rocksdb
+          PYTHON="$(command -v python3 || command -v python)"
+          "$PYTHON" "recipes/$LIB.py" --verify --triple "$TRIPLE" --out "$OUTDIR"
 
   publish-release:
     if: inputs.publish_release == true
