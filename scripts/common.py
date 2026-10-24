@@ -69,6 +69,19 @@ def run(
     return subprocess.run(list(command), cwd=cwd, env=env, check=check, text=True)
 
 
+def _canonicalize_env(env: dict[str, str]) -> dict[str, str]:
+    """Normalize Windows env-var casing (PATH/LIB/INCLUDE etc.).
+
+    On Windows the environment is case-insensitive, but a plain dict is not:
+    actions may export ``Path``/``Lib`` while we read ``PATH``/``LIB``.
+    Fold the common variables to their conventional uppercase names.
+    """
+    for key in ("PATH", "LIB", "INCLUDE", "LIBPATH"):
+        for k in [k for k in env if k.upper() == key and k != key]:
+            env.setdefault(key, env.pop(k))
+    return env
+
+
 def cargo_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
     """Env for cargo invocations: ensure ~/.cargo/bin is on PATH.
 
@@ -77,6 +90,7 @@ def cargo_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
     explicit instead of relying on the ambient environment.
     """
     merged = dict(os.environ if env is None else env)
+    _canonicalize_env(merged)
     cargo_bin = Path.home() / ".cargo" / "bin"
     path = merged.get("PATH", "")
     merged["PATH"] = (str(cargo_bin) + os.pathsep + path) if path else str(cargo_bin)
@@ -168,6 +182,7 @@ def _set_cargo_msvc_linker(env: dict[str, str]) -> None:
     if tools_bin is None:
         return
     linker = tools_bin / "link.exe"
+    log(f"cargo linker pinned: {linker}")
     for triple in ("X86_64_PC_WINDOWS_MSVC", "AARCH64_PC_WINDOWS_MSVC"):
         env[f"CARGO_TARGET_{triple}_LINKER"] = str(linker)
 
@@ -199,54 +214,79 @@ def _msvc_link_first(env: dict[str, str]) -> dict[str, str]:
     return env
 
 
+def _load_vsdevcmd(env: dict[str, str]) -> bool:
+    """Load the Visual Studio developer environment into ``env``.
+
+    Returns False when no Visual Studio installation is discoverable, in which
+    case the caller falls back to whatever MSVC environment is already active.
+    """
+    program_files = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    vswhere = Path(program_files) / "Microsoft Visual Studio/Installer/vswhere.exe"
+    if not vswhere.exists():
+        return False
+    out = subprocess.run(
+        [
+            str(vswhere), "-latest", "-products", "*",
+            "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+            "-property", "installationPath",
+        ],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    if not out:
+        return False
+    vsdevcmd = Path(out) / "Common7/Tools/VsDevCmd.bat"
+    if not vsdevcmd.exists():
+        return False
+    proc = subprocess.run(
+        ["cmd", "/d", "/s", "/c", f'call "{vsdevcmd}" && set'],
+        capture_output=True, text=True, check=False,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip() or "<no output>"
+        raise RuntimeError(
+            f"VsDevCmd.bat exited with {proc.returncode}: {detail}"
+        )
+    for line in proc.stdout.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            env[key] = value
+    return True
+
+
+def _log_msvc_env(env: Mapping[str, str]) -> None:
+    log(
+        "MSVC env: "
+        f"INCLUDE={'set' if env.get('INCLUDE') else 'MISSING'}, "
+        f"LIB={'set' if env.get('LIB') else 'MISSING'}"
+    )
+    lib = env.get("LIB", "")
+    if lib:
+        log(f"MSVC LIB (first 160 chars): {lib[:160]!r}")
+
+
 def ensure_msvc_env(env: dict[str, str] | None = None) -> dict[str, str]:
     """Activate the MSVC developer environment for this process (Windows).
 
-    If a valid MSVC environment is already present (cl on PATH plus INCLUDE
-    and LIB set — e.g. when the workflow ran an MSVC setup step beforehand),
-    it is reused as-is. Otherwise the Visual Studio developer environment is
-    loaded via VsDevCmd.bat and its variables are merged in.
+    The Visual Studio developer environment is loaded via VsDevCmd.bat so
+    INCLUDE/LIB/PATH are always authoritative, regardless of what the runner's
+    setup step exported (Git-Bash reorders PATH, and export quirks can leave
+    LIB unusable). If Visual Studio is not discoverable, an already-active
+    MSVC environment is reused as a fallback.
     """
     merged = dict(os.environ if env is None else env)
     if os.name != "nt":
         return merged
-    if (
-        shutil.which("cl", path=merged.get("PATH"))
-        and merged.get("INCLUDE")
-        and merged.get("LIB")
-    ):
-        log("MSVC env already active (cl + INCLUDE/LIB), reusing it")
-    else:
-        program_files = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-        vswhere = Path(program_files) / "Microsoft Visual Studio/Installer/vswhere.exe"
-        if not vswhere.exists():
+    _canonicalize_env(merged)
+    _log_msvc_env(merged)
+    if not _load_vsdevcmd(merged):
+        if not (
+            shutil.which("cl", path=merged.get("PATH"))
+            and merged.get("INCLUDE")
+            and merged.get("LIB")
+        ):
             raise RuntimeError("MSVC toolchain not found (vswhere missing)")
-        out = subprocess.run(
-            [
-                str(vswhere), "-latest", "-products", "*",
-                "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-                "-property", "installationPath",
-            ],
-            capture_output=True, text=True, check=True,
-        ).stdout.strip()
-        if not out:
-            raise RuntimeError("Visual Studio with C++ workload not found")
-        vsdevcmd = Path(out) / "Common7/Tools/VsDevCmd.bat"
-        if not vsdevcmd.exists():
-            raise RuntimeError(f"VsDevCmd.bat not found: {vsdevcmd}")
-        proc = subprocess.run(
-            ["cmd", "/d", "/s", "/c", f'call "{vsdevcmd}" && set'],
-            capture_output=True, text=True, check=False,
-        )
-        if proc.returncode != 0:
-            detail = (proc.stderr or proc.stdout).strip() or "<no output>"
-            raise RuntimeError(
-                f"VsDevCmd.bat exited with {proc.returncode}: {detail}"
-            )
-        for line in proc.stdout.splitlines():
-            if "=" in line:
-                key, _, value = line.partition("=")
-                merged[key] = value
+        log("MSVC env reused (VsDevCmd not available)")
+    _log_msvc_env(merged)
     _set_cargo_msvc_linker(merged)
     return _msvc_link_first(merged)
 
