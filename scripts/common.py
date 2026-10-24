@@ -145,6 +145,33 @@ def detect_triple() -> str:
     return "aarch64-unknown-linux-gnu" if "aarch" in machine else "x86_64-unknown-linux-gnu"
 
 
+def _msvc_tools_bin(env: Mapping[str, str]) -> Path | None:
+    """Return the MSVC tools bin dir (cl.exe + link.exe) from PATH, if any."""
+    for piece in env.get("PATH", "").split(os.pathsep):
+        if not piece:
+            continue
+        cand = Path(piece)
+        if (cand / "cl.exe").is_file() and (cand / "link.exe").is_file():
+            return cand
+    return None
+
+
+def _set_cargo_msvc_linker(env: dict[str, str]) -> None:
+    """Pin rustc's linker to the real MSVC ``link.exe`` via cargo env vars.
+
+    rustc resolves ``link.exe`` by scanning PATH, but in Git-Bash mixed
+    environments it can still pick ``C:\\Program Files\\Git\\usr\\bin\\link``
+    (the coreutils hard-link tool) even when MSVC precedes it on PATH.
+    Setting ``CARGO_TARGET_<TRIPLE>_LINKER`` explicitly removes any ambiguity.
+    """
+    tools_bin = _msvc_tools_bin(env)
+    if tools_bin is None:
+        return
+    linker = tools_bin / "link.exe"
+    for triple in ("X86_64_PC_WINDOWS_MSVC", "AARCH64_PC_WINDOWS_MSVC"):
+        env[f"CARGO_TARGET_{triple}_LINKER"] = str(linker)
+
+
 def _msvc_link_first(env: dict[str, str]) -> dict[str, str]:
     """Ensure MSVC ``link.exe`` precedes Git-Bash's ``/usr/bin/link``.
 
@@ -154,13 +181,20 @@ def _msvc_link_first(env: dict[str, str]) -> dict[str, str]:
     coreutils ``link`` (``/usr/bin/link``), which fails with "extra operand".
     Move the directory containing the real MSVC ``link.exe`` to the front.
     """
+    tools_bin = _msvc_tools_bin(env)
     pieces = env.get("PATH", "").split(os.pathsep)
-    for i, piece in enumerate(pieces):
-        if not piece:
-            continue
-        if (Path(piece) / "link.exe").is_file():
-            pieces.insert(0, pieces.pop(i))
-            break
+    if tools_bin is not None:
+        tools = str(tools_bin)
+        if tools in pieces:
+            pieces.remove(tools)
+        pieces.insert(0, tools)
+    else:
+        for i, piece in enumerate(pieces):
+            if not piece:
+                continue
+            if (Path(piece) / "link.exe").is_file():
+                pieces.insert(0, pieces.pop(i))
+                break
     env["PATH"] = os.pathsep.join(pieces)
     return env
 
@@ -182,37 +216,38 @@ def ensure_msvc_env(env: dict[str, str] | None = None) -> dict[str, str]:
         and merged.get("LIB")
     ):
         log("MSVC env already active (cl + INCLUDE/LIB), reusing it")
-        return _msvc_link_first(merged)
-    program_files = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-    vswhere = Path(program_files) / "Microsoft Visual Studio/Installer/vswhere.exe"
-    if not vswhere.exists():
-        raise RuntimeError("MSVC toolchain not found (vswhere missing)")
-    out = subprocess.run(
-        [
-            str(vswhere), "-latest", "-products", "*",
-            "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-            "-property", "installationPath",
-        ],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
-    if not out:
-        raise RuntimeError("Visual Studio with C++ workload not found")
-    vsdevcmd = Path(out) / "Common7/Tools/VsDevCmd.bat"
-    if not vsdevcmd.exists():
-        raise RuntimeError(f"VsDevCmd.bat not found: {vsdevcmd}")
-    proc = subprocess.run(
-        ["cmd", "/d", "/s", "/c", f'call "{vsdevcmd}" && set'],
-        capture_output=True, text=True, check=False,
-    )
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout).strip() or "<no output>"
-        raise RuntimeError(
-            f"VsDevCmd.bat exited with {proc.returncode}: {detail}"
+    else:
+        program_files = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        vswhere = Path(program_files) / "Microsoft Visual Studio/Installer/vswhere.exe"
+        if not vswhere.exists():
+            raise RuntimeError("MSVC toolchain not found (vswhere missing)")
+        out = subprocess.run(
+            [
+                str(vswhere), "-latest", "-products", "*",
+                "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property", "installationPath",
+            ],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        if not out:
+            raise RuntimeError("Visual Studio with C++ workload not found")
+        vsdevcmd = Path(out) / "Common7/Tools/VsDevCmd.bat"
+        if not vsdevcmd.exists():
+            raise RuntimeError(f"VsDevCmd.bat not found: {vsdevcmd}")
+        proc = subprocess.run(
+            ["cmd", "/d", "/s", "/c", f'call "{vsdevcmd}" && set'],
+            capture_output=True, text=True, check=False,
         )
-    for line in proc.stdout.splitlines():
-        if "=" in line:
-            key, _, value = line.partition("=")
-            merged[key] = value
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip() or "<no output>"
+            raise RuntimeError(
+                f"VsDevCmd.bat exited with {proc.returncode}: {detail}"
+            )
+        for line in proc.stdout.splitlines():
+            if "=" in line:
+                key, _, value = line.partition("=")
+                merged[key] = value
+    _set_cargo_msvc_linker(merged)
     return _msvc_link_first(merged)
 
 
