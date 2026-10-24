@@ -133,10 +133,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: native-libs-v${{ inputs.release_version }}
         run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" release/native-libs-*.zip release/SHA256SUMS.txt --clobber
+          REPO="vkozio/prebuilt-native-libs"
+          if gh release view "$RELEASE_TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/native-libs-*.zip release/SHA256SUMS.txt --repo "$REPO" --clobber
           else
             gh release create "$RELEASE_TAG" release/native-libs-*.zip release/SHA256SUMS.txt \
+              --repo "$REPO" \
               --title "native-libs ${{ inputs.release_version }}" \
               --notes "Prebuilt native libraries: ${{ inputs.libs }}"
           fi
