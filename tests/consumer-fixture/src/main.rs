@@ -49,14 +49,18 @@ fn test_sqlite() {
         .unwrap();
     assert_eq!(count, 1);
 
-    let mut stmt = conn.prepare("SELECT v FROM t").unwrap();
-    let mut seen = 0;
-    while let Ok(sqlite::State::Row) = stmt.next() {
-        let v: String = stmt.read::<String, _>(0).unwrap();
-        assert_eq!(v, "hello");
-        seen += 1;
+    // The statement borrows `conn`; keep it scoped so the borrow ends before
+    // `drop(conn)` below.
+    {
+        let mut stmt = conn.prepare("SELECT v FROM t").unwrap();
+        let mut seen = 0;
+        while let Ok(sqlite::State::Row) = stmt.next() {
+            let v: String = stmt.read::<String, _>(0).unwrap();
+            assert_eq!(v, "hello");
+            seen += 1;
+        }
+        assert_eq!(seen, 1);
     }
-    assert_eq!(seen, 1);
 
     drop(conn);
     let _ = std::fs::remove_dir_all(&dir);
