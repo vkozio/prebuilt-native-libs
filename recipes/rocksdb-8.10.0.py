@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from common import (
+    cargo_env,
     download,
     extract_tarball,
     log,
@@ -73,7 +74,7 @@ def build(triple: str, out: Path, cache: Path, rock_version: str = ROCK_VERSION)
     if not (upstream_in_scratch / "AUTHORS").exists():
         shutil.copytree(src, upstream_in_scratch)
 
-    env = dict(os.environ)
+    env = cargo_env()
     env["CARGO_TARGET_DIR"] = str(scratch / "target")
     env["ROCKSDB_INCLUDE_DIR"] = str(upstream_in_scratch / "include")
     run(["cargo", "build", "--release"], cwd=scratch, env=env)
@@ -122,7 +123,7 @@ def verify(out: Path, triple: str, cache: Path) -> None:
     run(
         ["cargo", "run", "--release", "--no-default-features", "--features", FEATURE],
         cwd=REPO_ROOT / "tests" / "consumer-fixture",
-        env=env,
+        env=cargo_env(env),
     )
     log(f"rocksdb consumer fixture PASSED ({triple})")
 

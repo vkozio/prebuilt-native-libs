@@ -69,6 +69,20 @@ def run(
     return subprocess.run(list(command), cwd=cwd, env=env, check=check, text=True)
 
 
+def cargo_env(env: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Env for cargo invocations: ensure ~/.cargo/bin is on PATH.
+
+    Rust toolchain actions usually extend PATH for the whole job, but on some
+    runners (Windows bash) cargo may end up missing from PATH; make it
+    explicit instead of relying on the ambient environment.
+    """
+    merged = dict(os.environ if env is None else env)
+    cargo_bin = Path.home() / ".cargo" / "bin"
+    path = merged.get("PATH", "")
+    merged["PATH"] = (str(cargo_bin) + os.pathsep + path) if path else str(cargo_bin)
+    return merged
+
+
 def download(url: str, dest: Path) -> Path:
     """Download to dest unless it already exists."""
     dest.parent.mkdir(parents=True, exist_ok=True)

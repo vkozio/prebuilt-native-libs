@@ -18,6 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from common import (
+    cargo_env,
     download,
     ensure_msvc_env,
     extract_zip_strip,
@@ -124,7 +125,7 @@ def verify(out: Path, triple: str, cache: Path) -> None:
     run(
         ["cargo", "run", "--release", "--no-default-features", "--features", FEATURE],
         cwd=REPO_ROOT / "tests" / "consumer-fixture",
-        env=env,
+        env=cargo_env(env),
     )
     log(f"sqlite consumer fixture PASSED ({triple})")
 

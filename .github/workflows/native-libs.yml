@@ -31,6 +31,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - id: set
         env:
           LIBS: ${{ inputs.libs }}
@@ -47,6 +51,10 @@ jobs:
         include: ${{ fromJSON(needs.filter.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: MSVC (Windows)
         if: runner.os == 'Windows'
