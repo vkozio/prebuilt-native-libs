@@ -166,10 +166,23 @@ def _msvc_link_first(env: dict[str, str]) -> dict[str, str]:
 
 
 def ensure_msvc_env(env: dict[str, str] | None = None) -> dict[str, str]:
-    """Activate the MSVC developer environment for this process (Windows)."""
+    """Activate the MSVC developer environment for this process (Windows).
+
+    If a valid MSVC environment is already present (cl on PATH plus INCLUDE
+    and LIB set — e.g. when the workflow ran an MSVC setup step beforehand),
+    it is reused as-is. Otherwise the Visual Studio developer environment is
+    loaded via VsDevCmd.bat and its variables are merged in.
+    """
     merged = dict(os.environ if env is None else env)
     if os.name != "nt":
         return merged
+    if (
+        shutil.which("cl", path=merged.get("PATH"))
+        and merged.get("INCLUDE")
+        and merged.get("LIB")
+    ):
+        log("MSVC env already active (cl + INCLUDE/LIB), reusing it")
+        return _msvc_link_first(merged)
     program_files = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
     vswhere = Path(program_files) / "Microsoft Visual Studio/Installer/vswhere.exe"
     if not vswhere.exists():
@@ -187,11 +200,16 @@ def ensure_msvc_env(env: dict[str, str] | None = None) -> dict[str, str]:
     vsdevcmd = Path(out) / "Common7/Tools/VsDevCmd.bat"
     if not vsdevcmd.exists():
         raise RuntimeError(f"VsDevCmd.bat not found: {vsdevcmd}")
-    lines = subprocess.run(
-        ["cmd", "/d", "/s", "/c", f'call "{vsdevcmd}" >nul && set'],
-        capture_output=True, text=True, check=True,
-    ).stdout.splitlines()
-    for line in lines:
+    proc = subprocess.run(
+        ["cmd", "/d", "/s", "/c", f'call "{vsdevcmd}" && set'],
+        capture_output=True, text=True, check=False,
+    )
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip() or "<no output>"
+        raise RuntimeError(
+            f"VsDevCmd.bat exited with {proc.returncode}: {detail}"
+        )
+    for line in proc.stdout.splitlines():
         if "=" in line:
             key, _, value = line.partition("=")
             merged[key] = value
