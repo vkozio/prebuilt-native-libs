@@ -75,6 +75,8 @@ def build(triple: str, out: Path, cache: Path, rock_version: str = ROCK_VERSION)
         shutil.copytree(src, upstream_in_scratch)
 
     env = cargo_env()
+    if "windows-msvc" in triple:
+        env = ensure_msvc_env(env)
     env["CARGO_TARGET_DIR"] = str(scratch / "target")
     env["ROCKSDB_INCLUDE_DIR"] = str(upstream_in_scratch / "include")
     run(["cargo", "build", "--release"], cwd=scratch, env=env)
@@ -120,6 +122,8 @@ def verify(out: Path, triple: str, cache: Path) -> None:
     env[f"{ENV_PREFIX}_LIB_DIR"] = str(staging / "lib")
     env[f"{ENV_PREFIX}_INCLUDE_DIR"] = str(staging / "include")
     env[f"{ENV_PREFIX}_STATIC"] = "1"
+    if "windows-msvc" in triple:
+        env = ensure_msvc_env(env)
     cargo = shutil.which("cargo")
     log(f"cargo binary: {cargo}  (path={env.get('PATH', '')[:200]})")
     if cargo:

@@ -122,6 +122,8 @@ def verify(out: Path, triple: str, cache: Path) -> None:
     env[f"{ENV_PREFIX}_LIB_DIR"] = str(staging / "lib")
     env[f"{ENV_PREFIX}_INCLUDE_DIR"] = str(staging / "include")
     env[f"{ENV_PREFIX}_STATIC"] = "1"
+    if "windows-msvc" in triple:
+        env = ensure_msvc_env(env)
     cargo = shutil.which("cargo")
     log(f"cargo binary: {cargo}  (path={env.get('PATH', '')[:200]})")
     if cargo:

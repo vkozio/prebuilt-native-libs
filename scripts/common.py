@@ -145,15 +145,35 @@ def detect_triple() -> str:
     return "aarch64-unknown-linux-gnu" if "aarch" in machine else "x86_64-unknown-linux-gnu"
 
 
+def _msvc_link_first(env: dict[str, str]) -> dict[str, str]:
+    """Ensure MSVC ``link.exe`` precedes Git-Bash's ``/usr/bin/link``.
+
+    rustc resolves the linker by scanning PATH, and on Windows runners Git for
+    Windows puts ``C:\\Program Files\\Git\\usr\\bin`` early in PATH. If that
+    directory comes before the Visual Studio tools, cargo is cl and the Git
+    coreutils ``link`` (``/usr/bin/link``), which fails with "extra operand".
+    Move the directory containing the real MSVC ``link.exe`` to the front.
+    """
+    pieces = env.get("PATH", "").split(os.pathsep)
+    for i, piece in enumerate(pieces):
+        if not piece:
+            continue
+        if (Path(piece) / "link.exe").is_file():
+            pieces.insert(0, pieces.pop(i))
+            break
+    env["PATH"] = os.pathsep.join(pieces)
+    return env
+
+
 def ensure_msvc_env(env: dict[str, str] | None = None) -> dict[str, str]:
     """Activate the MSVC developer environment for this process (Windows)."""
     merged = dict(os.environ if env is None else env)
-    if shutil.which("cl"):
+    if os.name != "nt":
         return merged
     program_files = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
     vswhere = Path(program_files) / "Microsoft Visual Studio/Installer/vswhere.exe"
     if not vswhere.exists():
-        raise RuntimeError("MSVC toolchain not found (cl.exe missing, vswhere missing)")
+        raise RuntimeError("MSVC toolchain not found (vswhere missing)")
     out = subprocess.run(
         [
             str(vswhere), "-latest", "-products", "*",
@@ -175,7 +195,7 @@ def ensure_msvc_env(env: dict[str, str] | None = None) -> dict[str, str]:
         if "=" in line:
             key, _, value = line.partition("=")
             merged[key] = value
-    return merged
+    return _msvc_link_first(merged)
 
 
 def package_artifact(

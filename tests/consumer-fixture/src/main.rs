@@ -14,13 +14,19 @@ fn test_rocksdb() {
     db.put(b"key2", b"value2").expect("put");
     let got = db.get(b"key1").expect("get").expect("value");
     assert_eq!(got.as_slice(), b"value1");
-    let mut it = db.iterator(rocksdb::IteratorMode::Start);
-    let mut n = 0;
-    while let Some(Ok(kv)) = it.next() {
-        assert!(kv.0.len() > 0);
-        n += 1;
+
+    // The iterator borrows the DB; keep it scoped so the borrow ends before
+    // exclusive use of `db` below (drop/delete).
+    {
+        let mut it = db.iterator(rocksdb::IteratorMode::Start);
+        let mut n = 0;
+        while let Some(Ok(kv)) = it.next() {
+            assert!(kv.0.len() > 0);
+            n += 1;
+        }
+        assert_eq!(n, 2);
     }
-    assert_eq!(n, 2);
+
     db.delete(b"key2").expect("delete");
     assert!(db.get(b"key2").expect("get").is_none());
     drop(db);
