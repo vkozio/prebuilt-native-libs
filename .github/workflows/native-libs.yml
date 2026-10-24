@@ -1,0 +1,155 @@
+name: native-libs
+
+# Current mode: manual dispatch.
+# Automation (next step):
+#   - release on tag push:  on: push: tags: ['native-libs-v*']  (version from tag)
+#   - dev channel:          on: push: branches: [main]  (actions/upload-artifact)
+on:
+  workflow_dispatch:
+    inputs:
+      libs:
+        description: 'Libraries: sqlite,rocksdb-8.10.0 or all'
+        type: string
+        default: 'all'
+      publish_release:
+        description: 'Publish a GitHub Release (native-libs-v<release_version>)'
+        type: boolean
+        default: false
+      release_version:
+        description: 'Release version'
+        type: string
+        default: '0.1.0'
+
+permissions:
+  contents: write
+
+jobs:
+  filter:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        env:
+          LIBS: ${{ inputs.libs }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          sel = [x.strip() for x in os.environ["LIBS"].split(",") if x.strip()]
+          all_libs = ["sqlite", "rocksdb-8.10.0"]
+          if "all" in sel:
+              sel = all_libs
+          else:
+              sel = [l for l in all_libs if l in sel]
+          os_map = {
+              "windows-2022": "x86_64-pc-windows-msvc",
+              "ubuntu-22.04": "x86_64-unknown-linux-gnu",
+              "macos-15-intel": "x86_64-apple-darwin",
+              "macos-26-arm64": "aarch64-apple-darwin",
+          }
+          lib_os = {l: list(os_map) for l in all_libs}
+          rows = []
+          for lib in sel:
+              for os_name in lib_os[lib]:
+                  rows.append({"lib": lib, "os": os_name, "triple": os_map[os_name]})
+          print(json.dumps(rows))
+          PY
+
+  build:
+    needs: filter
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.filter.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: MSVC (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Rust toolchain (RocksDB)
+        if: matrix.lib == 'rocksdb-8.10.0'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build & package
+        id: build
+        shell: bash
+        env:
+          LIB: ${{ matrix.lib }}
+          TRIPLE: ${{ matrix.triple }}
+          OUTDIR: ${{ runner.temp }}/out
+        run: |
+          mkdir -p "$OUTDIR"
+          python "recipes/$LIB.py" --triple "$TRIPLE" --out "$OUTDIR"
+
+      - name: Validate manifest & sha256
+        shell: bash
+        env:
+          OUTDIR: ${{ runner.temp }}/out
+        run: |
+          python scripts/check_manifest.py --zip "$OUTDIR"/native-libs-*.zip
+
+      - name: Upload artifact (dev channel)
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-libs-${{ matrix.lib }}-${{ matrix.triple }}
+          path: ${{ runner.temp }}/out/native-libs-*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify consumer fixture (sqlite)
+        if: matrix.lib == 'sqlite'
+        shell: bash
+        env:
+          SQLITE3_LIB_DIR: ${{ runner.temp }}/out/sqlite/lib
+          SQLITE3_INCLUDE_DIR: ${{ runner.temp }}/out/sqlite/include
+          SQLITE3_STATIC: '1'
+        run: |
+          cd tests/consumer-fixture
+          cargo run --release --no-default-features --features sqlite
+
+      - name: Verify consumer fixture (rocksdb)
+        if: matrix.lib == 'rocksdb-8.10.0'
+        shell: bash
+        env:
+          ROCKSDB_LIB_DIR: ${{ runner.temp }}/out/rocksdb/lib
+          ROCKSDB_INCLUDE_DIR: ${{ runner.temp }}/out/rocksdb/include
+          ROCKSDB_STATIC: '1'
+        run: |
+          cd tests/consumer-fixture
+          cargo run --release --no-default-features --features rocksdb
+
+  publish-release:
+    if: inputs.publish_release == true
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Collect + SHA256SUMS
+        shell: bash
+        run: |
+          mkdir -p release
+          cp artifacts/native-libs-*.zip release/
+          (cd release && sha256sum *.zip > SHA256SUMS.txt)
+
+      - name: Publish GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: native-libs-v${{ inputs.release_version }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release/native-libs-*.zip release/SHA256SUMS.txt --clobber
+          else
+            gh release create "$RELEASE_TAG" release/native-libs-*.zip release/SHA256SUMS.txt \
+              --title "native-libs ${{ inputs.release_version }}" \
+              --notes "Prebuilt native libraries: ${{ inputs.libs }}"
+          fi

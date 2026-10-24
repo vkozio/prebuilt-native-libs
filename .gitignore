@@ -1,0 +1,7 @@
+# local caches, scratch builds
+/cache/
+/scratch/
+_scratch/
+*.zip
+!tests/consumer-fixture/Cargo.lock
+target/

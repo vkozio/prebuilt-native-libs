@@ -1,0 +1,18 @@
+[package]
+name = "consumer-fixture"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[features]
+default = ["rocksdb", "sqlite"]
+rocksdb = ["dep:rocksdb", "dep:librocksdb-sys"]
+sqlite = ["dep:sqlite"]
+
+[dependencies]
+rocksdb = { version = "=0.22.0", optional = true }
+librocksdb-sys = { version = "=0.16.0", optional = true }
+sqlite = { version = "=0.36.2", optional = true }
+
+[profile.release]
+debug = false
